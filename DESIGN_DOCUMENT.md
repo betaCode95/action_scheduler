@@ -2,384 +2,182 @@
 
 ## 1. Overview
 
-The Action Scheduler SDK is a cross-platform Flutter library that enables mobile developers to schedule and execute recurring tasks locally on the device. The SDK handles **when** to run a task, while the app developer defines **what** the task does.
+The Action Scheduler SDK is a cross-platform Flutter plugin that enables mobile developers to schedule and execute recurring tasks locally on the device. The SDK handles **when** to run a task, while the app developer defines **what** the task does via a simple callback.
 
-### Core Capabilities
+**Platform support**: Android (AlarmManager for background execution) and iOS (BGTaskScheduler for background execution). The Dart scheduling logic, persistence, and API are fully shared across both platforms.
 
-- **Flexible Scheduling**: Daily, weekly, monthly, and custom interval recurrence rules
-- **Background Execution**: Native platform alarms (Android AlarmManager / iOS BGTaskScheduler) run tasks even when the app is closed
-- **Persistence**: All actions and execution history survive app restarts and device reboots
-- **Reliability**: Startup recovery detects and logs missed executions, then catches up
-- **Observability**: Complete execution audit trail with queryable success/failure logs
-- **Notifications**: Configurable pre-action reminder notifications with adjustable lead times
-- **Simple API**: Single facade class (`ActionScheduler`) with intuitive methods
+**Sample app**: Included in the repository with two example scheduled actions:
+1. **Daily DigiGold Auto-Save** — Runs every day at 9:00 AM with a 1-hour advance notification
+2. **Monthly Auto-Recharge** — Runs on the 1st of every month at 10:00 AM with a 24-hour advance notification
 
 ---
 
 ## 2. Architecture
 
-### 2.1 High-Level Architecture
+### 2.1 Layered Architecture
+
+The SDK follows a layered design with a Facade pattern. App developers interact only with the `ActionScheduler` singleton. All internals are hidden.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        App Developer                            │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Register      │  │ Action       │  │ Query Execution      │  │
-│  │ Actions       │  │ Handler      │  │ Logs & Stats         │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-│         │                 │                      │              │
-├─────────┼─────────────────┼──────────────────────┼──────────────┤
-│         ▼                 ▼                      ▼              │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                  ActionScheduler (Facade)                │    │
-│  │                                                         │    │
-│  │  • register() / unregister() / pause() / resume()       │    │
-│  │  • onActionDue = handler                                │    │
-│  │  • start() / stop()                                     │    │
-│  │  • getExecutionLogs() / getFailedExecutions()           │    │
-│  │  • triggerNow() (manual execution)                      │    │
-│  │  • actionChanges / executionChanges (streams)           │    │
-│  └──────────┬──────────────────────────────────────────────┘    │
-│             │                                                   │
-│  ┌──────────┼──────────────────────────────────────────────┐    │
-│  │          ▼            SDK Internals                     │    │
-│  │                                                         │    │
-│  │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │    │
-│  │  │  Schedule    │  │  Task        │  │ Notification  │  │    │
-│  │  │  Evaluator   │  │  Runner      │  │ Service       │  │    │
-│  │  │             │  │              │  │               │  │    │
-│  │  │ • Next run  │  │ • Execute    │  │ • Schedule    │  │    │
-│  │  │   time calc │  │   due tasks  │  │   reminders   │  │    │
-│  │  │ • Missed    │  │ • Record     │  │ • Cancel /    │  │    │
-│  │  │   run       │  │   results    │  │   reschedule  │  │    │
-│  │  │   detection │  │ • Startup    │  │               │  │    │
-│  │  │             │  │   recovery   │  │               │  │    │
-│  │  └─────────────┘  └──────┬───────┘  └───────────────┘  │    │
-│  │                          │                              │    │
-│  │  ┌───────────────────────┼───────────────────────────┐  │    │
-│  │  │                       ▼                           │  │    │
-│  │  │              Persistence Layer                    │  │    │
-│  │  │                                                   │  │    │
-│  │  │  ┌────────────────┐  ┌─────────────────────────┐  │  │    │
-│  │  │  │ ActionRepo     │  │ ExecutionRepo            │  │  │    │
-│  │  │  │                │  │                          │  │  │    │
-│  │  │  │ • CRUD for     │  │ • CRUD for execution     │  │  │    │
-│  │  │  │   scheduled    │  │   records                │  │  │    │
-│  │  │  │   actions      │  │ • Stats aggregation      │  │  │    │
-│  │  │  │ • Query due    │  │ • Failure filtering      │  │  │    │
-│  │  │  │   actions      │  │ • Log retention/pruning  │  │  │    │
-│  │  │  └────────┬───────┘  └──────────┬──────────────┘  │  │    │
-│  │  │           │                     │                 │  │    │
-│  │  │           ▼                     ▼                 │  │    │
-│  │  │    ┌─────────────────────────────────────────┐    │  │    │
-│  │  │    │         SQLite Database                  │    │  │    │
-│  │  │    │                                         │    │  │    │
-│  │  │    │  scheduled_actions │ execution_logs     │    │  │    │
-│  │  │    └─────────────────────────────────────────┘    │  │    │
-│  │  └───────────────────────────────────────────────────┘  │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                      App Developer Code                       │
+│                                                               │
+│   register()   onActionDue = handler   getExecutionLogs()     │
+│       │                │                      │               │
+├───────┼────────────────┼──────────────────────┼───────────────┤
+│       ▼                ▼                      ▼               │
+│  ┌────────────────────────────────────────────────────────┐   │
+│  │              ActionScheduler (Facade)                   │   │
+│  │  Singleton entry point — manages lifecycle, routing,    │   │
+│  │  and coordination between all internal components       │   │
+│  └────────┬──────────┬──────────────┬─────────────────────┘   │
+│           │          │              │                          │
+│  ┌────────▼───┐ ┌────▼────────┐ ┌──▼──────────────┐          │
+│  │ Schedule   │ │ Task        │ │ Notification     │          │
+│  │ Evaluator  │ │ Runner      │ │ Service          │          │
+│  │            │ │             │ │                  │          │
+│  │ Next run   │ │ Execute     │ │ Pre-action       │          │
+│  │ time calc  │ │ due tasks   │ │ reminders via    │          │
+│  │ Missed run │ │ Record      │ │ flutter_local_   │          │
+│  │ detection  │ │ results     │ │ notifications    │          │
+│  └────────────┘ └──────┬──────┘ └─────────────────┘          │
+│                        │                                      │
+│  ┌─────────────────────▼──────────────────────────────────┐   │
+│  │               Persistence Layer (SQLite)                │   │
+│  │                                                         │   │
+│  │  ActionRepository          ExecutionRepository          │   │
+│  │  (CRUD for actions)        (CRUD for execution logs)    │   │
+│  │                                                         │   │
+│  │              DatabaseProvider (schema, connection)       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            Native Background Layer                      │   │
+│  │                                                         │   │
+│  │  Android: AlarmManager + BroadcastReceiver + Service    │   │
+│  │  iOS:     BGTaskScheduler + BGProcessingTask            │   │
+│  │                                                         │   │
+│  │  Both start a headless FlutterEngine when the alarm     │   │
+│  │  fires, executing the Dart callback without any UI.     │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Component Responsibilities
-
-| Component | Responsibility |
-|-----------|---------------|
-| **ActionScheduler** | Singleton facade — the only class app developers interact with |
-| **ScheduleEvaluator** | Pure computation: next run times, missed run detection, day clamping |
-| **TaskRunner** | Execution engine: runs due actions, records results, handles errors |
-| **NotificationService** | Manages `flutter_local_notifications` lifecycle and scheduling |
-| **ActionRepository** | CRUD for `scheduled_actions` table with query helpers |
-| **ExecutionRepository** | CRUD for `execution_logs` table with stats/filtering |
-| **DatabaseProvider** | SQLite connection management, schema creation, migrations |
-
-### 2.3 Data Model
+### 2.2 Data Model
 
 ```
-┌──────────────────────────┐       ┌──────────────────────────────┐
-│    ScheduledAction       │       │     ExecutionRecord          │
-├──────────────────────────┤       ├──────────────────────────────┤
-│ id: String (PK)          │──┐    │ id: String (PK)             │
-│ name: String             │  │    │ actionId: String (FK) ──────┼──┐
-│ description: String?     │  │    │ scheduledTime: DateTime     │  │
-│ schedule: Schedule       │  │    │ executionTime: DateTime?    │  │
-│ isActive: bool           │  │    │ status: ExecutionStatus     │  │
-│ createdAt: DateTime      │  │    │ durationMs: int             │  │
-│ lastRunAt: DateTime?     │  │    │ errorMessage: String?       │  │
-│ nextRunAt: DateTime?     │  └────│ failureReason: FailureReason│  │
-│ notification: NotifConfig│       └──────────────────────────────┘  │
-│ metadata: Map?           │                                        │
-└──────────────────────────┘       1:N relationship ────────────────┘
+ScheduledAction                        ExecutionRecord
+─────────────────                      ─────────────────
+id          (PK)  ──── 1:N ────────▶  id           (PK)
+name                                   actionId     (FK)
+description                            scheduledTime
+schedule: Schedule                     executionTime
+isActive                               status (success/failed/missed)
+createdAt                              durationMs
+lastRunAt                              errorMessage
+nextRunAt                              failureReason
+notification: NotificationConfig
+metadata: Map<String, String>
 
-┌──────────────────────────┐       ┌──────────────────────────────┐
-│    Schedule              │       │    NotificationConfig        │
-├──────────────────────────┤       ├──────────────────────────────┤
-│ type: ScheduleType       │       │ title: String               │
-│ hour: int (0-23)         │       │ body: String                │
-│ minute: int (0-59)       │       │ leadTime: Duration          │
-│ dayOfWeek: int? (1-7)    │       │ enabled: bool               │
-│ dayOfMonth: int? (1-31)  │       └──────────────────────────────┘
-│ interval: Duration?      │
-└──────────────────────────┘
+Schedule                               NotificationConfig
+─────────────────                      ─────────────────
+type (daily/weekly/monthly/interval)   title
+hour, minute                           body
+dayOfWeek (for weekly)                 leadTime (Duration, e.g. 30s)
+dayOfMonth (for monthly)               enabled
+interval (for custom)
 ```
 
 ---
 
-## 3. Key Design Decisions
+## 3. Persistence, Scheduling, and Observability
 
-### 3.1 Persistence: SQLite via sqflite
+### 3.1 Persistence
 
-**Decision**: Use SQLite for all persistent storage.
+All data is stored in a local **SQLite database** via the `sqflite` package.
 
-**Rationale**:
-- SQLite is battle-tested, available on both Android and iOS natively
-- Supports complex queries (joins, aggregations) needed for execution stats
-- ACID transactions ensure data consistency even during crashes
-- `sqflite` is the most mature Flutter SQLite package with platform support
-- Indexed columns (`actionId`, `scheduledTime`, `status`) ensure fast queries
+- **Two tables**: `scheduled_actions` (action definitions, schedules, state) and `execution_logs` (full audit trail of every execution attempt)
+- **Indexed columns**: `actionId`, `scheduledTime`, and `status` on the execution logs table for fast queries
+- **Survives app restarts and device reboots** — the database file persists on disk
+- The `DatabaseProvider` auto-reopens the connection if it was closed, handling concurrent access between foreground and background isolates
 
-**Alternative considered**: SharedPreferences — rejected due to lack of query capabilities, poor performance with large datasets, and no transactional guarantees.
+### 3.2 Scheduling — Three Layers of Defense
 
-### 3.2 Scheduling: Native Alarms + Foreground Timer + Startup Recovery
+The SDK uses a layered approach to ensure tasks run reliably:
 
-**Decision**: Use native platform alarms (Android `AlarmManager` / iOS `BGTaskScheduler`) as the primary scheduling mechanism, with a foreground timer as a secondary check, and startup recovery as a safety net.
+| Layer | Mechanism | When it works |
+|-------|-----------|---------------|
+| **Primary** | Native platform alarms (Android `AlarmManager.setExactAndAllowWhileIdle` / iOS `BGTaskScheduler`) | App killed, phone idle, after reboot |
+| **Secondary** | Dart `Timer.periodic` every 30 seconds | App in foreground — instant execution, no engine startup overhead |
+| **Safety net** | Startup recovery on `ActionScheduler.start()` | Catches anything the other two layers missed |
 
-**Rationale**:
-- **Native Alarms (Primary)**: When the SDK computes a `nextRunAt`, it schedules a platform-native alarm. On Android, `AlarmManager.setExactAndAllowWhileIdle()` fires at the exact scheduled time even in Doze mode. On iOS, `BGProcessingTaskRequest` with `earliestBeginDate` fires approximately at the right time. When the alarm fires, native code starts a **headless Flutter engine** to execute the due actions without any UI.
-- **Foreground Timer (Secondary)**: A 30-second `Timer.periodic` checks for due actions when the app is in the foreground. This avoids the ~2-3 second headless engine startup overhead and provides near-instant execution when the user has the app open.
-- **Startup Recovery (Safety Net)**: On every app launch, the SDK detects all missed executions, logs them as "missed," and executes the most recent one as a catch-up. This handles edge cases where both the alarm and foreground timer missed (e.g., extended device-off period).
+**Background execution flow**: When a native alarm fires, the OS starts a `BackgroundExecutionService` (Android) or triggers a `BGProcessingTask` (iOS). This service launches a **headless FlutterEngine** (no UI), resolves the developer's Dart callback via `PluginUtilities`, initializes the SQLite database, runs all due actions, records results, and signals completion back to native.
 
-**Trade-offs**:
-  - Android 12+ requires the `SCHEDULE_EXACT_ALARM` permission; Android 14+ may require the user to grant it manually in settings
-  - iOS `BGProcessingTask` timing is approximate — iOS decides the exact trigger time based on battery, usage patterns, etc.
-  - The headless Flutter engine adds ~2-3 seconds of startup overhead per background execution
+**Startup recovery flow**: On every app launch, the SDK queries all active actions where `nextRunAt < now`. For each, it computes every missed run time, logs them as `ExecutionRecord(status: missed)`, executes the most recent one as a catch-up, and advances `nextRunAt` to the next future occurrence.
 
-### 3.3 Notification System: flutter_local_notifications
+### 3.3 Observability
 
-**Decision**: Use `flutter_local_notifications` for pre-action reminders.
+The SDK maintains a complete audit trail:
 
-**Rationale**:
-- Cross-platform (Android + iOS) from a single API
-- Supports exact-time scheduled notifications via `zonedSchedule`
-- Notifications persist across app restarts (platform-managed)
-- Configurable lead time per action (e.g., 15 min, 1 hour, 24 hours)
-- Notification taps can carry a payload (action ID) for deep linking
-
-### 3.4 API Design: Singleton Facade Pattern
-
-**Decision**: Expose all SDK functionality through a single `ActionScheduler` class using the singleton pattern.
-
-**Rationale**:
-- Minimizes the learning curve — developers interact with one class
-- Initialization is explicit (`ActionScheduler.initialize()`) and fail-fast
-- Internal components are hidden behind the facade
-- Streams (`actionChanges`, `executionChanges`) enable reactive UI updates
-
-### 3.5 Action Handler: Callback Pattern
-
-**Decision**: App developers register a single callback (`onActionDue`) that receives the action ID and metadata.
-
-**Rationale**:
-- Keeps the SDK agnostic about what actions do
-- The `switch`-on-action-ID pattern is simple and explicit
-- Metadata map allows passing arbitrary data (amount, currency, plan, etc.)
-- Return value (`bool`) cleanly signals success/failure
+- **Every execution** (success, failure, or miss) is recorded as an `ExecutionRecord` with timestamp, duration, status, and error details
+- **Query APIs**: `getExecutionLogs(actionId)`, `getAllExecutionLogs()`, `getFailedExecutions()`, `getExecutionStats(actionId)` — returns totals, success count, failure count, and average duration
+- **Reactive streams**: `actionChanges` and `executionChanges` broadcast real-time updates for UI binding
+- **Failure categorization**: `FailureReason` enum distinguishes between callback errors, app not running, device offline, and timeout
+- **Log pruning**: `pruneExecutionLogs(retention: Duration(days: 30))` for cleanup
 
 ---
 
-## 4. Execution Flow
-
-### 4.1 Normal Execution (App in Foreground)
-
-```
-Timer fires (every 30s)
-    │
-    ▼
-TaskRunner.runDueActions()
-    │
-    ├── Query: SELECT * FROM scheduled_actions WHERE isActive=1 AND nextRunAt <= NOW()
-    │
-    ▼
-For each due action:
-    │
-    ├── Call handler(actionId, metadata)
-    │     │
-    │     ├── Success → Record ExecutionRecord(status: success, durationMs: ...)
-    │     └── Failure → Record ExecutionRecord(status: failed, errorMessage: ...)
-    │
-    ├── Compute next run time via ScheduleEvaluator
-    ├── Update action's lastRunAt and nextRunAt
-    └── Reschedule notification for next occurrence
-```
-
-### 4.2 Startup Recovery (After App Restart)
-
-```
-App starts → ActionScheduler.start()
-    │
-    ├── Query all active actions
-    │
-    ▼
-For each action where nextRunAt < NOW():
-    │
-    ├── Compute all missed run times since lastRunAt
-    │
-    ├── Log each intermediate missed run as ExecutionRecord(status: missed)
-    │
-    ├── Execute the most recent missed run (catch-up)
-    │     │
-    │     ├── Success → Record as success
-    │     └── Failure → Record as failed
-    │
-    ├── Compute next future run time
-    └── Schedule notification for next occurrence
-```
-
-### 4.3 Notification Flow
-
-```
-Action registered with NotificationConfig
-    │
-    ├── Compute nextRunAt
-    ├── Schedule notification at (nextRunAt - leadTime)
-    │
-    ▼
-Notification fires (platform-managed, works even if app is closed)
-    │
-    ├── User sees reminder: "Your daily save will run at 9:00 AM"
-    │
-    ▼
-When action executes:
-    │
-    ├── Cancel old notification
-    ├── Compute new nextRunAt
-    └── Schedule new notification at (new nextRunAt - leadTime)
-```
-
----
-
-## 5. Trade-offs and Assumptions
+## 4. Trade-offs and Assumptions
 
 ### Trade-offs
 
-| Trade-off | Decision | Reason |
-|-----------|----------|--------|
-| **Background execution** | Deferred to future | Foreground + recovery covers core use cases without platform complexity |
-| **Exact-time execution** | Best-effort (30s window) | Perfect timing requires AlarmManager/BGTaskScheduler which are platform-specific |
-| **Concurrency** | Sequential execution | Avoids race conditions; sufficient for typical mobile task volumes |
-| **Log retention** | Unlimited by default | `pruneExecutionLogs()` API available for cleanup; developer controls policy |
-| **Handler registration** | Single callback | Simpler than per-action callbacks; `switch` pattern is idiomatic |
+| Decision | Trade-off | Rationale |
+|----------|-----------|-----------|
+| SQLite over SharedPreferences | More complex setup | Needed for queries, aggregations, and indexed lookups on execution history |
+| AlarmManager over WorkManager | Requires `SCHEDULE_EXACT_ALARM` permission on Android 12+ | Provides exact-time execution; WorkManager has a 15-minute minimum interval |
+| Headless FlutterEngine for background | ~2-3s startup overhead per background execution | Allows reusing 100% of the Dart SDK logic (DB, scheduling, recording) without duplicating it in native code |
+| Single callback handler | Less flexible than per-action callbacks | Simpler API; `switch` on action ID is idiomatic and explicit |
+| Sequential task execution | No parallel execution of multiple due actions | Avoids race conditions on the shared database; sufficient for typical mobile task volumes |
+| iOS BGProcessingTask timing is approximate | Tasks may run late on iOS | This is an OS-level limitation — no third-party app gets exact background timing on iOS |
+| Foreground timer kept as fallback | Slight resource usage when app is open | Provides instant execution without headless engine overhead; belt-and-suspenders with native alarms |
 
 ### Assumptions
 
-1. **App launches regularly**: The startup recovery mechanism assumes the app is opened at least daily. Actions missed during extended inactivity will be caught up on next launch.
-2. **Tasks are idempotent**: Catch-up execution assumes running a missed action once is safe, even if delayed.
-3. **Tasks are lightweight**: The SDK executes tasks on the main isolate. CPU-intensive tasks should use `compute()` internally.
-4. **Metadata is simple**: Key-value string pairs. Complex data should be stored externally and referenced by ID.
+1. **Tasks are idempotent** — Catch-up execution assumes running a missed action once (even if delayed) is safe
+2. **Tasks are lightweight** — Executed on the main Dart isolate; CPU-intensive work should use `compute()` internally
+3. **App launches regularly** — Extended inactivity is recovered on next launch, but only the most recent missed run is actually executed (others are logged as missed)
+4. **Metadata is simple** — Key-value string pairs; complex data should be stored externally and referenced by ID
 
 ---
 
-## 6. Future Scope and Enhancements
+## 5. Future Scope
 
-### 6.1 Retry Policy (Priority: Medium)
-Add configurable retry strategies for failed actions:
-- Exponential backoff (1min, 5min, 30min, ...)
-- Maximum retry count
-- Dead-letter queue for permanently failed actions
-
-### 6.2 Action Dependencies (Priority: Medium)
-Support action chaining where Action B runs only after Action A succeeds:
-```dart
-Schedule.after('action-a', delay: Duration(minutes: 5))
-```
-
-### 6.3 Cron Expression Support (Priority: Low)
-Support standard cron expressions for advanced scheduling:
-```dart
-Schedule.cron('0 9 * * 1-5') // Weekdays at 9 AM
-```
-
-### 6.4 Remote Configuration (Priority: Low)
-Allow schedule definitions to be fetched from a remote server, enabling dynamic schedule updates without app releases.
-
-### 6.5 Analytics Dashboard (Priority: Low)
-A built-in Flutter widget that visualizes execution history, success rates, and failure trends as charts.
-
+| Enhancement | Description |
+|-------------|-------------|
+| **Retry policy** | Configurable exponential backoff for failed actions with a maximum retry count and dead-letter queue |
+| **Action dependencies** | Chaining where Action B runs only after Action A succeeds, with configurable delay |
+| **Cron expressions** | Standard cron syntax for advanced scheduling (e.g., `0 9 * * 1-5` for weekdays at 9 AM) |
+| **Remote configuration** | Fetch schedule definitions from a server for dynamic updates without app releases |
+| **Analytics widget** | Built-in Flutter widget visualizing execution history, success rates, and failure trends |
 
 ---
 
-## 7. Project Structure
+## 6. Project Structure and Sample App
 
-The SDK is a standalone Flutter package under `packages/`, cleanly separated from the sample app. Any Flutter project can depend on it via a path or pub dependency.
+The SDK is a standalone Flutter plugin package under `packages/`, cleanly separated from the sample app. Any Flutter project can depend on it via a path or pub dependency.
 
 ```
 action_scheduler/
-├── packages/
-│   └── action_scheduler_sdk/              # ← Standalone SDK package
-│       ├── pubspec.yaml                   # SDK's own dependencies
-│       ├── lib/
-│       │   ├── action_scheduler_sdk.dart  # Public barrel export
-│       │   └── src/
-│       │       ├── action_scheduler.dart  # Main facade / API
-│       │       ├── models/
-│       │       │   ├── schedule.dart
-│       │       │   ├── scheduled_action.dart
-│       │       │   ├── execution_record.dart
-│       │       │   └── notification_config.dart
-│       │       ├── engine/
-│       │       │   ├── schedule_evaluator.dart
-│       │       │   └── task_runner.dart
-│       │       ├── persistence/
-│       │       │   ├── database_provider.dart
-│       │       │   ├── action_repository.dart
-│       │       │   └── execution_repository.dart
-│       │       └── notifications/
-│       │           └── notification_service.dart
-│       └── test/
-│           └── schedule_evaluator_test.dart
-├── lib/                                   # ← Sample app
-│   ├── main.dart
-│   └── app/
-│       ├── theme.dart
-│       ├── sample_actions.dart
-│       ├── screens/
-│       │   ├── home_screen.dart
-│       │   ├── action_detail_screen.dart
-│       │   └── add_action_screen.dart
-│       └── widgets/
-│           ├── action_card.dart
-│           └── execution_tile.dart
-├── test/
-│   └── widget_test.dart
-├── pubspec.yaml                           # Sample app depends on SDK via path
+├── packages/action_scheduler_sdk/     # Standalone SDK plugin
+│   ├── lib/src/                       # Dart: models, engine, persistence, notifications
+│   ├── android/src/                   # Kotlin: AlarmManager, BroadcastReceiver, headless engine
+│   ├── ios/Classes/                   # Swift: BGTaskScheduler, headless engine
+│   └── test/                          # Unit tests for ScheduleEvaluator
+├── lib/                               # Sample app
+│   ├── main.dart                      # Entry point with background callback registration
+│   └── app/                           # Screens, widgets, theme, sample action definitions
 ├── DESIGN_DOCUMENT.md
 └── README.md
 ```
 
-### Integration
-
-Any Flutter app can add the SDK as a dependency:
-
-```yaml
-# Via path (local development)
-dependencies:
-  action_scheduler_sdk:
-    path: packages/action_scheduler_sdk
-
-# Via pub.dev (once published)
-dependencies:
-  action_scheduler_sdk: ^1.0.0
-```
-
----
-
-## 8. Sample App
-
-The included sample app demonstrates two pre-configured scheduled actions:
-
-1. **Daily DigiGold Auto-Save**: Runs every day at 9:00 AM, simulating a ₹100 savings deposit with a 1-hour advance notification.
-
-2. **Monthly Auto-Recharge**: Runs on the 1st of every month at 10:00 AM, simulating a ₹499 mobile recharge with a 24-hour advance notification.
-
-The app also allows users to create custom actions through a form UI, view execution history with success/failure filtering, manually trigger actions for testing, and pause/resume actions.
+The sample app demonstrates: registering actions with schedules, configuring pre-action notifications (including 30-second lead time), viewing execution history across all actions, filtering by failures, manually triggering actions, and pausing/resuming actions — all powered by the SDK's public API.
