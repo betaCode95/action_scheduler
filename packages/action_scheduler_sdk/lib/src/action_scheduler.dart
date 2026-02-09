@@ -170,11 +170,7 @@ class ActionScheduler {
         final dbProvider = DatabaseProvider();
         final actionRepo = ActionRepository(dbProvider);
         final executionRepo = ExecutionRepository(dbProvider);
-        final taskRunner = TaskRunner(
-          actionRepo,
-          executionRepo,
-          executionContext: ExecutionContext.background,
-        );
+        final taskRunner = TaskRunner(actionRepo, executionRepo);
 
         taskRunner.registerHandler(handler);
 
@@ -189,7 +185,8 @@ class ActionScheduler {
           }
         }
 
-        await dbProvider.close();
+        // Note: do NOT close the database here -- it may be shared with
+        // the foreground app in the same process.
 
         // Signal native that we're done
         await BackgroundChannel.backgroundTaskComplete();

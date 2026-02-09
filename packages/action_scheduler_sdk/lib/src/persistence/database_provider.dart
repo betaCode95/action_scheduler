@@ -2,17 +2,19 @@ import 'package:sqflite/sqflite.dart';
 
 /// Provides and manages the SQLite database for the Action Scheduler SDK.
 ///
-/// Handles database creation, schema migrations, and provides
-/// access to the database instance.
+/// Handles database creation and provides access to the database instance.
+/// The database connection is automatically re-opened if it was previously closed.
 class DatabaseProvider {
   static const String _databaseName = 'action_scheduler.db';
-  static const int _databaseVersion = 2;
+  static const int _databaseVersion = 1;
 
   Database? _database;
 
-  /// Returns the database instance, creating it if necessary.
+  /// Returns the database instance, creating or re-opening it if necessary.
   Future<Database> get database async {
-    _database ??= await _initDatabase();
+    if (_database == null || !_database!.isOpen) {
+      _database = await _initDatabase();
+    }
     return _database!;
   }
 
@@ -24,12 +26,10 @@ class DatabaseProvider {
       path,
       version: _databaseVersion,
       onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Table for scheduled action definitions
     await db.execute('''
       CREATE TABLE scheduled_actions (
         id TEXT PRIMARY KEY,
@@ -48,13 +48,12 @@ class DatabaseProvider {
         hasNotification INTEGER NOT NULL DEFAULT 0,
         notifTitle TEXT,
         notifBody TEXT,
-        leadTimeMinutes INTEGER,
+        leadTimeSeconds INTEGER,
         notifEnabled INTEGER,
         metadata TEXT
       )
     ''');
 
-    // Table for execution history / logs
     await db.execute('''
       CREATE TABLE execution_logs (
         id TEXT PRIMARY KEY,
@@ -65,43 +64,28 @@ class DatabaseProvider {
         durationMs INTEGER NOT NULL DEFAULT 0,
         errorMessage TEXT,
         failureReason INTEGER NOT NULL DEFAULT 0,
-        executionContext INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (actionId) REFERENCES scheduled_actions(id) ON DELETE CASCADE
       )
     ''');
 
-    // Index for efficient querying of logs by action
-    await db.execute('''
-      CREATE INDEX idx_execution_logs_actionId ON execution_logs(actionId)
-    ''');
-
-    // Index for querying logs by time
-    await db.execute('''
-      CREATE INDEX idx_execution_logs_scheduledTime ON execution_logs(scheduledTime)
-    ''');
-
-    // Index for querying logs by status
-    await db.execute('''
-      CREATE INDEX idx_execution_logs_status ON execution_logs(status)
-    ''');
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // Add executionContext column (0 = foreground as default for existing rows)
-      await db.execute(
-        'ALTER TABLE execution_logs ADD COLUMN executionContext INTEGER NOT NULL DEFAULT 0',
-      );
-    }
+    await db.execute(
+      'CREATE INDEX idx_execution_logs_actionId ON execution_logs(actionId)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_execution_logs_scheduledTime ON execution_logs(scheduledTime)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_execution_logs_status ON execution_logs(status)',
+    );
   }
 
   /// Closes the database connection.
   Future<void> close() async {
     final db = _database;
-    if (db != null) {
+    if (db != null && db.isOpen) {
       await db.close();
-      _database = null;
     }
+    _database = null;
   }
 
   /// Deletes all data from all tables (useful for testing).

@@ -26,7 +26,7 @@ class _AddActionScreenState extends State<AddActionScreen> {
   int _dayOfWeek = 1; // Monday
   int _dayOfMonth = 1;
   bool _enableNotification = false;
-  int _leadTimeMinutes = 60;
+  int _leadTimeSeconds = 3600; // default: 1 hour
   bool _saving = false;
 
   @override
@@ -214,21 +214,20 @@ class _AddActionScreenState extends State<AddActionScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
-                initialValue: _leadTimeMinutes,
+                initialValue: _leadTimeSeconds,
                 decoration: const InputDecoration(
                   labelText: 'Notify Before',
                   prefixIcon: Icon(Icons.notifications_active),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 15, child: Text('15 minutes before')),
-                  DropdownMenuItem(value: 30, child: Text('30 minutes before')),
-                  DropdownMenuItem(value: 60, child: Text('1 hour before')),
-                  DropdownMenuItem(
-                      value: 120, child: Text('2 hours before')),
-                  DropdownMenuItem(
-                      value: 1440, child: Text('24 hours before')),
+                  DropdownMenuItem(value: 30, child: Text('30 seconds before')),
+                  DropdownMenuItem(value: 900, child: Text('15 minutes before')),
+                  DropdownMenuItem(value: 1800, child: Text('30 minutes before')),
+                  DropdownMenuItem(value: 3600, child: Text('1 hour before')),
+                  DropdownMenuItem(value: 7200, child: Text('2 hours before')),
+                  DropdownMenuItem(value: 86400, child: Text('24 hours before')),
                 ],
-                onChanged: (v) => setState(() => _leadTimeMinutes = v!),
+                onChanged: (v) => setState(() => _leadTimeSeconds = v!),
               ),
             ],
 
@@ -302,7 +301,7 @@ class _AddActionScreenState extends State<AddActionScreen> {
                 const Icon(Icons.notifications, size: 16),
                 const SizedBox(width: 6),
                 Text(
-                  'Notification $_leadTimeMinutes min before',
+                  'Notification ${_formatLeadTime(_leadTimeSeconds)} before',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -338,6 +337,13 @@ class _AddActionScreenState extends State<AddActionScreen> {
     }
   }
 
+  String _formatLeadTime(int seconds) {
+    if (seconds < 60) return '$seconds seconds';
+    if (seconds < 3600) return '${seconds ~/ 60} minutes';
+    if (seconds < 86400) return '${seconds ~/ 3600} hour${seconds >= 7200 ? 's' : ''}';
+    return '${seconds ~/ 86400} day${seconds >= 172800 ? 's' : ''}';
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -351,7 +357,7 @@ class _AddActionScreenState extends State<AddActionScreen> {
         notifConfig = NotificationConfig(
           title: _notifTitleController.text.trim(),
           body: _notifBodyController.text.trim(),
-          leadTime: Duration(minutes: _leadTimeMinutes),
+          leadTime: Duration(seconds: _leadTimeSeconds),
         );
       }
 

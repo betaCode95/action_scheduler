@@ -172,17 +172,24 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadData() async {
-    final actions = await ActionScheduler.instance.getAllActions();
-    final recent = await ActionScheduler.instance.getAllExecutionLogs(limit: 50);
-    final failed = await ActionScheduler.instance.getFailedExecutions(limit: 50);
+    try {
+      final actions = await ActionScheduler.instance.getAllActions();
+      final recent =
+          await ActionScheduler.instance.getAllExecutionLogs(limit: 50);
+      final failed =
+          await ActionScheduler.instance.getFailedExecutions(limit: 50);
 
-    if (mounted) {
-      setState(() {
-        _actions = actions;
-        _recentExecutions = recent;
-        _failedExecutions = failed;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _actions = actions;
+          _recentExecutions = recent;
+          _failedExecutions = failed;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      // Database may be temporarily unavailable; retry on next refresh
+      debugPrint('[ActionScheduler] _loadData error: $e');
     }
   }
 

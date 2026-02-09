@@ -23,7 +23,7 @@ typedef ActionHandler = Future<bool> Function(
 /// The TaskRunner is the core execution engine of the SDK. It:
 /// 1. Finds all actions that are due to run
 /// 2. Executes them via the registered handler
-/// 3. Records execution results (success/failure/duration/context)
+/// 3. Records execution results (success/failure/duration)
 /// 4. Computes and stores the next run time
 class TaskRunner {
   final ActionRepository _actionRepo;
@@ -36,13 +36,7 @@ class TaskRunner {
   /// Timer for periodic foreground checks.
   Timer? _foregroundTimer;
 
-  /// The execution context to tag records with.
-  /// Defaults to foreground; set to background when running in a headless isolate.
-  ExecutionContext executionContext;
-
-  TaskRunner(this._actionRepo, this._executionRepo, {
-    this.executionContext = ExecutionContext.foreground,
-  });
+  TaskRunner(this._actionRepo, this._executionRepo);
 
   /// Registers the action handler that will be called when actions are due.
   void registerHandler(ActionHandler handler) {
@@ -134,11 +128,7 @@ class TaskRunner {
 
       // Execute the most recent due occurrence (catch-up execution)
       if (missedTimes.isNotEmpty) {
-        await _executeAction(
-          action,
-          scheduledTime: missedTimes.last,
-          contextOverride: ExecutionContext.recovery,
-        );
+        await _executeAction(action, scheduledTime: missedTimes.last);
         recovered++;
       }
     }
@@ -150,11 +140,9 @@ class TaskRunner {
   Future<void> _executeAction(
     ScheduledAction action, {
     DateTime? scheduledTime,
-    ExecutionContext? contextOverride,
   }) async {
     final effectiveScheduledTime =
         scheduledTime ?? action.nextRunAt ?? DateTime.now();
-    final effectiveContext = contextOverride ?? executionContext;
     final executionStart = DateTime.now();
 
     try {
@@ -170,9 +158,9 @@ class TaskRunner {
         executionTime: executionStart,
         status: success ? ExecutionStatus.success : ExecutionStatus.failed,
         durationMs: durationMs,
-        failureReason: success ? FailureReason.none : FailureReason.callbackError,
+        failureReason:
+            success ? FailureReason.none : FailureReason.callbackError,
         errorMessage: success ? null : 'Action handler returned false',
-        executionContext: effectiveContext,
       ));
 
       // Compute next run time
@@ -196,7 +184,6 @@ class TaskRunner {
         durationMs: durationMs,
         failureReason: FailureReason.callbackError,
         errorMessage: e.toString(),
-        executionContext: effectiveContext,
       ));
 
       // Still advance the next run time on failure
@@ -236,9 +223,9 @@ class TaskRunner {
         executionTime: executionStart,
         status: success ? ExecutionStatus.success : ExecutionStatus.failed,
         durationMs: durationMs,
-        failureReason: success ? FailureReason.none : FailureReason.callbackError,
+        failureReason:
+            success ? FailureReason.none : FailureReason.callbackError,
         errorMessage: success ? null : 'Action handler returned false',
-        executionContext: executionContext,
       );
 
       await _executionRepo.insert(record);
@@ -257,7 +244,6 @@ class TaskRunner {
         durationMs: durationMs,
         failureReason: FailureReason.callbackError,
         errorMessage: e.toString(),
-        executionContext: executionContext,
       );
 
       await _executionRepo.insert(record);

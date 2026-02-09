@@ -11,8 +11,8 @@ class NotificationConfig {
 
   /// How long before the action to trigger the notification.
   ///
-  /// For example, `Duration(hours: 24)` sends the notification
-  /// 24 hours before the action runs.
+  /// For example, `Duration(seconds: 30)` sends the notification
+  /// 30 seconds before the action runs.
   final Duration leadTime;
 
   /// Whether the notification is enabled.
@@ -30,7 +30,7 @@ class NotificationConfig {
     return {
       'notifTitle': title,
       'notifBody': body,
-      'leadTimeMinutes': leadTime.inMinutes,
+      'leadTimeSeconds': leadTime.inSeconds,
       'notifEnabled': enabled ? 1 : 0,
     };
   }
@@ -40,7 +40,7 @@ class NotificationConfig {
     return NotificationConfig(
       title: map['notifTitle'] as String,
       body: map['notifBody'] as String,
-      leadTime: Duration(minutes: map['leadTimeMinutes'] as int),
+      leadTime: Duration(seconds: map['leadTimeSeconds'] as int),
       enabled: (map['notifEnabled'] as int) == 1,
     );
   }
@@ -62,5 +62,5 @@ class NotificationConfig {
 
   @override
   String toString() =>
-      'NotificationConfig(title: $title, leadTime: ${leadTime.inMinutes}min, enabled: $enabled)';
+      'NotificationConfig(title: $title, leadTime: ${leadTime.inSeconds}s, enabled: $enabled)';
 }

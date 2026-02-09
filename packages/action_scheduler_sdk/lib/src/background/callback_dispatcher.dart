@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:flutter/widgets.dart';
 
 import '../engine/task_runner.dart';
-import '../models/execution_record.dart';
 import '../persistence/action_repository.dart';
 import '../persistence/database_provider.dart';
 import '../persistence/execution_repository.dart';
@@ -35,15 +34,14 @@ void callbackDispatcher() {
         final dbProvider = DatabaseProvider();
         final actionRepo = ActionRepository(dbProvider);
         final executionRepo = ExecutionRepository(dbProvider);
-        final taskRunner = TaskRunner(
-          actionRepo,
-          executionRepo,
-          executionContext: ExecutionContext.background,
-        );
+        final taskRunner = TaskRunner(actionRepo, executionRepo);
 
         taskRunner.registerHandler(handler);
         await taskRunner.runDueActions();
-        await dbProvider.close();
+        // Note: do NOT close the database here. When running in the same
+        // process as the foreground app, closing it would kill the shared
+        // sqflite connection and crash the UI. The DB is cleaned up
+        // automatically when the isolate/process exits.
       }
 
       // Signal native that we're done
