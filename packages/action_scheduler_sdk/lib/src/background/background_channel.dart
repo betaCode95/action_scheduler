@@ -56,6 +56,18 @@ class BackgroundChannel {
     });
   }
 
+  /// Registers the app developer's action handler with native code.
+  ///
+  /// This is stored separately from the dispatcher handle. When the headless
+  /// engine starts, the dispatcher receives this handle to look up and call
+  /// the actual action handler function.
+  static Future<void> registerActionHandler(
+      CallbackHandle callbackHandle) async {
+    await _channel.invokeMethod('registerActionHandler', {
+      'callbackHandle': callbackHandle.toRawHandle(),
+    });
+  }
+
   /// Schedules a native exact-time alarm for the given action.
   ///
   /// On Android: Uses AlarmManager.setExactAndAllowWhileIdle()

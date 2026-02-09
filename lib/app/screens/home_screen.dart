@@ -196,6 +196,13 @@ class _HomeScreenState extends State<HomeScreen>
           'Action Scheduler',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: _loadData,
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: [

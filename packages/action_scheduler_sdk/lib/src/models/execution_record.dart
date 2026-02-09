@@ -34,10 +34,23 @@ enum FailureReason {
   unknown,
 }
 
+/// Where the execution took place.
+enum ExecutionContext {
+  /// Executed while the app was in the foreground (via Timer or manual trigger).
+  foreground,
+
+  /// Executed in a headless background isolate (via AlarmManager / BGTask).
+  background,
+
+  /// Executed during startup recovery (catch-up for missed runs).
+  recovery,
+}
+
 /// A record of a single action execution attempt.
 ///
 /// Tracks when the action was scheduled vs when it actually ran,
-/// the outcome, and any error details.
+/// the outcome, any error details, and whether it ran in the
+/// foreground or background.
 class ExecutionRecord {
   /// Unique identifier for this execution record.
   final String id;
@@ -63,6 +76,9 @@ class ExecutionRecord {
   /// Categorized failure reason.
   final FailureReason failureReason;
 
+  /// Whether this was a foreground, background, or recovery execution.
+  final ExecutionContext executionContext;
+
   const ExecutionRecord({
     required this.id,
     required this.actionId,
@@ -72,6 +88,7 @@ class ExecutionRecord {
     this.durationMs = 0,
     this.errorMessage,
     this.failureReason = FailureReason.none,
+    this.executionContext = ExecutionContext.foreground,
   });
 
   /// Serializes to a map for database storage.
@@ -85,6 +102,7 @@ class ExecutionRecord {
       'durationMs': durationMs,
       'errorMessage': errorMessage,
       'failureReason': failureReason.index,
+      'executionContext': executionContext.index,
     };
   }
 
@@ -101,6 +119,8 @@ class ExecutionRecord {
       durationMs: map['durationMs'] as int? ?? 0,
       errorMessage: map['errorMessage'] as String?,
       failureReason: FailureReason.values[map['failureReason'] as int? ?? 0],
+      executionContext: ExecutionContext
+          .values[map['executionContext'] as int? ?? 0],
     );
   }
 
@@ -113,5 +133,5 @@ class ExecutionRecord {
 
   @override
   String toString() =>
-      'ExecutionRecord(actionId: $actionId, status: $status, scheduled: $scheduledTime)';
+      'ExecutionRecord(actionId: $actionId, status: $status, context: ${executionContext.name}, scheduled: $scheduledTime)';
 }

@@ -6,6 +6,7 @@ import 'package:action_scheduler_sdk/action_scheduler_sdk.dart';
 /// 1. Daily DigiGold Auto-Save (every day at 9 AM)
 /// 2. Monthly Auto-Recharge (1st of every month at 10 AM)
 
+@pragma('vm:entry-point')
 class SampleActions {
   /// Daily DigiGold Auto-Save
   ///
@@ -57,6 +58,7 @@ class SampleActions {
   /// This is what the app developer provides to define what happens
   /// when each action is due. The SDK calls this function with the
   /// action ID and metadata when an action's scheduled time arrives.
+  @pragma('vm:entry-point')
   static Future<bool> handler(
       String actionId, Map<String, String>? metadata) async {
     switch (actionId) {
@@ -73,6 +75,7 @@ class SampleActions {
   }
 
   /// Simulates saving to DigiGold.
+  @pragma('vm:entry-point')
   static Future<bool> _handleDiGiGoldSave(Map<String, String>? metadata) async {
     final amount = metadata?['amount'] ?? '100';
     // Simulate an API call to save to DigiGold
@@ -83,6 +86,7 @@ class SampleActions {
   }
 
   /// Simulates processing an auto-recharge.
+  @pragma('vm:entry-point')
   static Future<bool> _handleAutoRecharge(Map<String, String>? metadata) async {
     final amount = metadata?['amount'] ?? '499';
     // Simulate an API call to process recharge
@@ -93,6 +97,7 @@ class SampleActions {
   }
 
   /// Handles user-created generic actions.
+  @pragma('vm:entry-point')
   static Future<bool> _handleGenericAction(
       String actionId, Map<String, String>? metadata) async {
     await Future.delayed(const Duration(milliseconds: 500));

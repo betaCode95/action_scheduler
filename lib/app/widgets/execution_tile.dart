@@ -83,6 +83,8 @@ class ExecutionTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               _buildStatusChip(context),
+              const SizedBox(height: 4),
+              _buildContextChip(),
               if (record.durationMs > 0) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -133,6 +135,67 @@ class ExecutionTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildContextChip() {
+    final color = _contextColor;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_contextIcon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            _contextLabel,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _contextLabel {
+    switch (record.executionContext) {
+      case ExecutionContext.foreground:
+        return 'FOREGROUND';
+      case ExecutionContext.background:
+        return 'BACKGROUND';
+      case ExecutionContext.recovery:
+        return 'RECOVERY';
+    }
+  }
+
+  Color get _contextColor {
+    switch (record.executionContext) {
+      case ExecutionContext.foreground:
+        return const Color(0xFF0984E3);
+      case ExecutionContext.background:
+        return const Color(0xFF6C5CE7);
+      case ExecutionContext.recovery:
+        return const Color(0xFFFDAA5E);
+    }
+  }
+
+  IconData get _contextIcon {
+    switch (record.executionContext) {
+      case ExecutionContext.foreground:
+        return Icons.phone_android;
+      case ExecutionContext.background:
+        return Icons.cloud_outlined;
+      case ExecutionContext.recovery:
+        return Icons.restore;
+    }
   }
 
   String get _statusText {

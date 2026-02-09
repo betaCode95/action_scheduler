@@ -78,6 +78,16 @@ class ActionSchedulerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
             }
 
+            "registerActionHandler" -> {
+                val callbackHandle = call.argument<Long>("callbackHandle")
+                if (callbackHandle != null) {
+                    saveCallbackHandle(context, PREF_ACTION_HANDLER_HANDLE, callbackHandle)
+                    result.success(true)
+                } else {
+                    result.error("INVALID_ARGS", "callbackHandle is required", null)
+                }
+            }
+
             "scheduleAlarm" -> {
                 val requestCode = call.argument<Int>("requestCode")
                 val triggerAtMillis = call.argument<Long>("triggerAtMillis")

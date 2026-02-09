@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'background/background_channel.dart';
@@ -143,12 +142,11 @@ class ActionScheduler {
     if (actionHandler != null) {
       final handlerHandle = PluginUtilities.getCallbackHandle(actionHandler);
       if (handlerHandle != null) {
-        const MethodChannel('com.actionscheduler.sdk/background')
-            .invokeMethod('registerCallbackDispatcher', {
-          'callbackHandle': handlerHandle.toRawHandle(),
-        }).catchError((_) {
+        try {
+          await BackgroundChannel.registerActionHandler(handlerHandle);
+        } catch (_) {
           // May fail if platform not available (e.g., tests)
-        });
+        }
       }
     }
   }
@@ -172,7 +170,11 @@ class ActionScheduler {
         final dbProvider = DatabaseProvider();
         final actionRepo = ActionRepository(dbProvider);
         final executionRepo = ExecutionRepository(dbProvider);
-        final taskRunner = TaskRunner(actionRepo, executionRepo);
+        final taskRunner = TaskRunner(
+          actionRepo,
+          executionRepo,
+          executionContext: ExecutionContext.background,
+        );
 
         taskRunner.registerHandler(handler);
 

@@ -42,11 +42,13 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 
     private fun startBackgroundService(context: Context) {
-        val serviceIntent = Intent(context, BackgroundExecutionService::class.java)
         try {
+            val serviceIntent = Intent(context, BackgroundExecutionService::class.java)
             context.startService(serviceIntent)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start BackgroundExecutionService", e)
+            Log.e(TAG, "Failed to start BackgroundExecutionService: ${e.message}", e)
+            // Service failed to start. The action will be picked up by
+            // startup recovery the next time the user opens the app.
         }
     }
 

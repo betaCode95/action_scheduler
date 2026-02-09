@@ -6,7 +6,7 @@ import 'package:sqflite/sqflite.dart';
 /// access to the database instance.
 class DatabaseProvider {
   static const String _databaseName = 'action_scheduler.db';
-  static const int _databaseVersion = 1;
+  static const int _databaseVersion = 2;
 
   Database? _database;
 
@@ -65,6 +65,7 @@ class DatabaseProvider {
         durationMs INTEGER NOT NULL DEFAULT 0,
         errorMessage TEXT,
         failureReason INTEGER NOT NULL DEFAULT 0,
+        executionContext INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (actionId) REFERENCES scheduled_actions(id) ON DELETE CASCADE
       )
     ''');
@@ -86,7 +87,12 @@ class DatabaseProvider {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Future schema migrations go here.
+    if (oldVersion < 2) {
+      // Add executionContext column (0 = foreground as default for existing rows)
+      await db.execute(
+        'ALTER TABLE execution_logs ADD COLUMN executionContext INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   /// Closes the database connection.
