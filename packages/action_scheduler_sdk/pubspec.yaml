@@ -21,3 +21,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: false
+  plugin:
+    platforms:
+      android:
+        package: com.actionscheduler.sdk
+        pluginClass: ActionSchedulerPlugin
+      ios:
+        pluginClass: ActionSchedulerPlugin

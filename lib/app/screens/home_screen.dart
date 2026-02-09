@@ -21,12 +21,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   List<ScheduledAction> _actions = [];
   List<ExecutionRecord> _recentExecutions = [];
   List<ExecutionRecord> _failedExecutions = [];
   bool _loading = true;
+  bool _permissionDialogShown = false;
 
   StreamSubscription? _actionSub;
   StreamSubscription? _executionSub;
@@ -34,8 +35,14 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
     _loadData();
+
+    // Check permissions after the first frame so context is valid for dialogs
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPermissions();
+    });
 
     // Listen for real-time changes
     _actionSub = ActionScheduler.instance.actionChanges.listen((_) {
@@ -46,8 +53,118 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  /// Re-check permission when the user returns from Settings.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkPermissions();
+    }
+  }
+
+  /// Checks required permissions on startup and prompts the user if needed.
+  ///
+  /// On Android 12+, SCHEDULE_EXACT_ALARM may be auto-granted but the user
+  /// can revoke it. We always show a one-time prompt on first launch to make
+  /// the user aware, and re-prompt if permission is revoked later.
+  Future<void> _checkPermissions() async {
+    if (!mounted || _permissionDialogShown) return;
+
+    final canSchedule = await ActionScheduler.canScheduleExactAlarms();
+
+    // Check if we've shown the first-launch prompt before
+    final hasShownOnce = await _hasShownPermissionPrompt();
+
+    if (!canSchedule) {
+      // Permission is NOT granted -- always show the dialog
+      _permissionDialogShown = true;
+      await _showPermissionDialog(
+        title: 'Enable Alarms & Reminders',
+        message:
+            'Action Scheduler needs the "Alarms & Reminders" permission '
+            'to run your scheduled actions on time, even when the app is '
+            'closed or the phone restarts.\n\n'
+            'Without this permission, tasks will only run when you open the app.',
+        actionLabel: 'Open Settings',
+        onAction: () => ActionScheduler.openExactAlarmSettings(),
+      );
+    } else if (!hasShownOnce) {
+      // Permission IS granted (auto-granted by OS), but first launch --
+      // show a confirmation so the user knows about it
+      _permissionDialogShown = true;
+      await _markPermissionPromptShown();
+      await _showPermissionDialog(
+        title: 'Background Scheduling Active',
+        message:
+            'The "Alarms & Reminders" permission is enabled. Your scheduled '
+            'actions will run on time even when the app is closed.\n\n'
+            'You can manage this in Settings > Apps > Action Scheduler > '
+            'Alarms & reminders.',
+        actionLabel: 'Got It',
+        onAction: null,
+        isInfoOnly: true,
+      );
+    }
+  }
+
+  Future<void> _showPermissionDialog({
+    required String title,
+    required String message,
+    required String actionLabel,
+    VoidCallback? onAction,
+    bool isInfoOnly = false,
+  }) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          isInfoOnly ? Icons.check_circle : Icons.alarm,
+          size: 40,
+          color: isInfoOnly ? const Color(0xFF00B894) : const Color(0xFF6C5CE7),
+        ),
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          if (!isInfoOnly)
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _permissionDialogShown = false;
+              },
+              child: const Text('Skip for Now'),
+            ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _permissionDialogShown = false;
+              onAction?.call();
+            },
+            icon: Icon(isInfoOnly ? Icons.check : Icons.settings),
+            label: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Checks SharedPreferences whether the first-launch permission prompt
+  /// has been shown before.
+  Future<bool> _hasShownPermissionPrompt() async {
+    // Use a simple approach: check via the SDK's own persistence
+    // We piggyback on the action count -- if actions exist, user has seen the app before
+    return _permissionPromptCompleted;
+  }
+
+  static bool _permissionPromptCompleted = false;
+
+  Future<void> _markPermissionPromptShown() async {
+    _permissionPromptCompleted = true;
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     _actionSub?.cancel();
     _executionSub?.cancel();

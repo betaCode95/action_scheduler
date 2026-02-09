@@ -5,6 +5,17 @@ import 'app/screens/home_screen.dart';
 import 'app/theme.dart';
 import 'package:action_scheduler_sdk/action_scheduler_sdk.dart';
 
+/// Top-level background callback dispatcher.
+///
+/// This function is invoked by the native platform (Android AlarmManager /
+/// iOS BGTaskScheduler) when a scheduled alarm fires while the app is closed.
+/// It MUST be a top-level function (not inside a class) so the native
+/// headless Flutter engine can find it.
+@pragma('vm:entry-point')
+void backgroundCallbackDispatcher() {
+  ActionScheduler.executeInBackground(SampleActions.handler);
+}
+
 /// Entry point for the Action Scheduler sample app.
 ///
 /// Demonstrates SDK integration with two example scheduled actions:
@@ -13,22 +24,25 @@ import 'package:action_scheduler_sdk/action_scheduler_sdk.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Step 1: Initialize the SDK
-  await ActionScheduler.initialize();
+  // Step 1: Initialize the SDK with background execution support
+  await ActionScheduler.initialize(
+    backgroundCallback: backgroundCallbackDispatcher,
+    actionHandler: SampleActions.handler,
+  );
 
-  // Step 2: Register the action handler
-  // This is where the app developer defines what each action does.
+  // Step 2: Register the action handler for foreground execution
   ActionScheduler.instance.onActionDue = SampleActions.handler;
 
   // Step 3: Register sample actions (only if not already registered)
   await _registerSampleActions();
 
   // Step 4: Start the scheduler
-  // This performs startup recovery (catches up missed actions)
-  // and begins periodic checking for due actions.
+  // This performs startup recovery (catches up missed actions),
+  // schedules native background alarms, and begins periodic foreground checks.
   final recovered = await ActionScheduler.instance.start();
   if (recovered > 0) {
-    debugPrint('[ActionScheduler] Recovered $recovered missed actions on startup');
+    debugPrint(
+        '[ActionScheduler] Recovered $recovered missed actions on startup');
   }
 
   runApp(const ActionSchedulerApp());
@@ -40,7 +54,8 @@ Future<void> _registerSampleActions() async {
     final existing = await ActionScheduler.instance.getAction(sample.id);
     if (existing == null) {
       await ActionScheduler.instance.register(sample);
-      debugPrint('[ActionScheduler] Registered sample action: ${sample.name}');
+      debugPrint(
+          '[ActionScheduler] Registered sample action: ${sample.name}');
     }
   }
 }

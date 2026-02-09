@@ -7,6 +7,7 @@ The Action Scheduler SDK is a cross-platform Flutter library that enables mobile
 ### Core Capabilities
 
 - **Flexible Scheduling**: Daily, weekly, monthly, and custom interval recurrence rules
+- **Background Execution**: Native platform alarms (Android AlarmManager / iOS BGTaskScheduler) run tasks even when the app is closed
 - **Persistence**: All actions and execution history survive app restarts and device reboots
 - **Reliability**: Startup recovery detects and logs missed executions, then catches up
 - **Observability**: Complete execution audit trail with queryable success/failure logs
@@ -140,20 +141,19 @@ The Action Scheduler SDK is a cross-platform Flutter library that enables mobile
 
 **Alternative considered**: SharedPreferences — rejected due to lack of query capabilities, poor performance with large datasets, and no transactional guarantees.
 
-### 3.2 Scheduling: Foreground Timer + Startup Recovery
+### 3.2 Scheduling: Native Alarms + Foreground Timer + Startup Recovery
 
-**Decision**: Use a periodic foreground timer (30-second interval) combined with startup recovery.
+**Decision**: Use native platform alarms (Android `AlarmManager` / iOS `BGTaskScheduler`) as the primary scheduling mechanism, with a foreground timer as a secondary check, and startup recovery as a safety net.
 
 **Rationale**:
-- **Foreground Timer**: Checks every 30 seconds for due actions when the app is active. This provides near-exact-time execution with minimal resource usage.
-- **Startup Recovery**: On every app launch, the SDK detects all missed executions (by comparing `nextRunAt` to current time), logs them as "missed," and executes the most recent one as a catch-up.
-- This approach is **deterministic and testable** — no platform-specific background scheduling quirks.
+- **Native Alarms (Primary)**: When the SDK computes a `nextRunAt`, it schedules a platform-native alarm. On Android, `AlarmManager.setExactAndAllowWhileIdle()` fires at the exact scheduled time even in Doze mode. On iOS, `BGProcessingTaskRequest` with `earliestBeginDate` fires approximately at the right time. When the alarm fires, native code starts a **headless Flutter engine** to execute the due actions without any UI.
+- **Foreground Timer (Secondary)**: A 30-second `Timer.periodic` checks for due actions when the app is in the foreground. This avoids the ~2-3 second headless engine startup overhead and provides near-instant execution when the user has the app open.
+- **Startup Recovery (Safety Net)**: On every app launch, the SDK detects all missed executions, logs them as "missed," and executes the most recent one as a catch-up. This handles edge cases where both the alarm and foreground timer missed (e.g., extended device-off period).
 
-**Alternative considered**: `workmanager` for background task execution — deferred to future scope due to:
-  - Android WorkManager enforces a minimum 15-minute interval
-  - iOS BGTaskScheduler has unpredictable timing
-  - Background execution in Flutter isolates can't access the full app context
-  - The foreground + recovery approach covers the core use cases reliably
+**Trade-offs**:
+  - Android 12+ requires the `SCHEDULE_EXACT_ALARM` permission; Android 14+ may require the user to grant it manually in settings
+  - iOS `BGProcessingTask` timing is approximate — iOS decides the exact trigger time based on battery, usage patterns, etc.
+  - The headless Flutter engine adds ~2-3 seconds of startup overhead per background execution
 
 ### 3.3 Notification System: flutter_local_notifications
 
@@ -282,35 +282,30 @@ When action executes:
 
 ## 6. Future Scope and Enhancements
 
-### 6.1 Background Execution (Priority: High)
-Integrate `workmanager` for periodic background checks when the app is not in the foreground. This would use Android WorkManager and iOS BGTaskScheduler to run the same `TaskRunner.runDueActions()` logic in a background isolate.
-
-### 6.2 Retry Policy (Priority: Medium)
+### 6.1 Retry Policy (Priority: Medium)
 Add configurable retry strategies for failed actions:
 - Exponential backoff (1min, 5min, 30min, ...)
 - Maximum retry count
 - Dead-letter queue for permanently failed actions
 
-### 6.3 Action Dependencies (Priority: Medium)
+### 6.2 Action Dependencies (Priority: Medium)
 Support action chaining where Action B runs only after Action A succeeds:
 ```dart
 Schedule.after('action-a', delay: Duration(minutes: 5))
 ```
 
-### 6.4 Cron Expression Support (Priority: Low)
+### 6.3 Cron Expression Support (Priority: Low)
 Support standard cron expressions for advanced scheduling:
 ```dart
 Schedule.cron('0 9 * * 1-5') // Weekdays at 9 AM
 ```
 
-### 6.5 Remote Configuration (Priority: Low)
+### 6.4 Remote Configuration (Priority: Low)
 Allow schedule definitions to be fetched from a remote server, enabling dynamic schedule updates without app releases.
 
-### 6.6 Analytics Dashboard (Priority: Low)
+### 6.5 Analytics Dashboard (Priority: Low)
 A built-in Flutter widget that visualizes execution history, success rates, and failure trends as charts.
 
-### 6.7 Platform Channels for Native Alarms (Priority: Medium)
-Use platform channels to leverage Android `AlarmManager` and iOS `UNNotificationRequest` for exact-time scheduling that survives app closure.
 
 ---
 

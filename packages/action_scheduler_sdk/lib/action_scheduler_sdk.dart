@@ -1,21 +1,31 @@
 /// Action Scheduler SDK
 ///
 /// A cross-platform SDK for scheduling and running local tasks on mobile devices.
+/// Supports background execution via Android AlarmManager and iOS BGTaskScheduler.
 ///
 /// ## Quick Start
 ///
 /// ```dart
 /// import 'package:action_scheduler_sdk/action_scheduler_sdk.dart';
 ///
+/// @pragma('vm:entry-point')
+/// void backgroundCallback() {
+///   ActionScheduler.executeInBackground(myHandler);
+/// }
+///
+/// Future<bool> myHandler(String actionId, Map<String, String>? metadata) async {
+///   // Handle the action
+///   return true;
+/// }
+///
 /// void main() async {
 ///   WidgetsFlutterBinding.ensureInitialized();
-///   await ActionScheduler.initialize();
+///   await ActionScheduler.initialize(
+///     backgroundCallback: backgroundCallback,
+///     actionHandler: myHandler,
+///   );
 ///
-///   ActionScheduler.instance.onActionDue = (actionId, metadata) async {
-///     // Handle the action
-///     return true;
-///   };
-///
+///   ActionScheduler.instance.onActionDue = myHandler;
 ///   await ActionScheduler.instance.register(
 ///     ScheduledAction(
 ///       id: 'my-action',
