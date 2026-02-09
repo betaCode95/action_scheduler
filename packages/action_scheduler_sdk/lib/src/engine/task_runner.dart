@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:uuid/uuid.dart';
 
+import '../background/background_channel.dart';
 import '../models/execution_record.dart';
 import '../models/scheduled_action.dart';
 import '../persistence/action_repository.dart';
@@ -94,14 +95,18 @@ class TaskRunner {
   /// Performs startup recovery: detects missed actions and logs them.
   ///
   /// For each active action whose nextRunAt is in the past:
-  /// - Logs missed execution records for each missed run
-  /// - Executes the most recent missed run (catch-up)
+  /// - Logs a failure record for EVERY missed run (with appropriate reason)
+  /// - Re-executes the action as a catch-up
   /// - Computes and stores the next future run time
   Future<int> performStartupRecovery() async {
     if (_handler == null) return 0;
 
     final activeActions = await _actionRepo.getActive();
     int recovered = 0;
+
+    // Determine failure reason once: check if Doze mode may have suppressed alarms.
+    final isExemptFromDoze =
+        await BackgroundChannel.isIgnoringBatteryOptimizations();
 
     for (final action in activeActions) {
       if (action.nextRunAt == null) continue;
@@ -114,26 +119,93 @@ class TaskRunner {
         lastRunAt: lastRun,
       );
 
-      // Log missed executions (except the last one which we'll run)
-      for (int i = 0; i < missedTimes.length - 1; i++) {
+      if (missedTimes.isEmpty) continue;
+
+      // Determine failure reason based on Doze status
+      final failureReason = !isExemptFromDoze
+          ? FailureReason.dozeModeSuppressed
+          : FailureReason.unknown;
+      final errorMessage = !isExemptFromDoze
+          ? 'Alarm likely suppressed by Doze mode (battery optimization enabled)'
+          : 'Scheduled execution was missed';
+
+      // Log a failure for EVERY missed run time
+      for (final missedTime in missedTimes) {
+        final delaySeconds =
+            DateTime.now().difference(missedTime).inSeconds;
         await _executionRepo.insert(ExecutionRecord(
           id: _uuid.v4(),
           actionId: action.id,
-          scheduledTime: missedTimes[i],
-          status: ExecutionStatus.missed,
-          failureReason: FailureReason.appNotRunning,
-          errorMessage: 'App was not running at scheduled time',
+          scheduledTime: missedTime,
+          status: ExecutionStatus.failed,
+          failureReason: failureReason,
+          errorMessage:
+              '$errorMessage (late by ${_formatDelay(delaySeconds)})',
         ));
       }
 
-      // Execute the most recent due occurrence (catch-up execution)
-      if (missedTimes.isNotEmpty) {
-        await _executeAction(action, scheduledTime: missedTimes.last);
-        recovered++;
+      // Now re-execute the action as a catch-up.
+      // This is recorded as a separate execution with lateExecution reason.
+      final now = DateTime.now();
+      final latestMiss = missedTimes.last;
+      final delaySeconds = now.difference(latestMiss).inSeconds;
+
+      try {
+        final success = await _handler!(action.id, action.metadata);
+        final executionEnd = DateTime.now();
+        final durationMs = executionEnd.difference(now).inMilliseconds;
+
+        await _executionRepo.insert(ExecutionRecord(
+          id: _uuid.v4(),
+          actionId: action.id,
+          scheduledTime: latestMiss,
+          executionTime: now,
+          status: success ? ExecutionStatus.success : ExecutionStatus.failed,
+          durationMs: durationMs,
+          failureReason: success
+              ? FailureReason.lateExecution
+              : FailureReason.callbackError,
+          errorMessage: success
+              ? 'Catch-up execution (late by ${_formatDelay(delaySeconds)})'
+              : 'Catch-up failed: handler returned false',
+        ));
+      } catch (e) {
+        final executionEnd = DateTime.now();
+        final durationMs = executionEnd.difference(now).inMilliseconds;
+
+        await _executionRepo.insert(ExecutionRecord(
+          id: _uuid.v4(),
+          actionId: action.id,
+          scheduledTime: latestMiss,
+          executionTime: now,
+          status: ExecutionStatus.failed,
+          durationMs: durationMs,
+          failureReason: FailureReason.callbackError,
+          errorMessage: 'Catch-up failed: $e',
+        ));
       }
+
+      // Advance to next run time
+      final nextRun = ScheduleEvaluator.computeNextRun(action.schedule);
+      await _actionRepo.updateRunTimes(
+        id: action.id,
+        lastRunAt: DateTime.now(),
+        nextRunAt: nextRun,
+      );
+
+      recovered++;
     }
 
     return recovered;
+  }
+
+  /// Formats a delay in seconds to a human-readable string.
+  static String _formatDelay(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    if (seconds < 3600) return '${seconds ~/ 60}m ${seconds % 60}s';
+    final hours = seconds ~/ 3600;
+    final mins = (seconds % 3600) ~/ 60;
+    return '${hours}h ${mins}m';
   }
 
   /// Executes a single action and records the result.

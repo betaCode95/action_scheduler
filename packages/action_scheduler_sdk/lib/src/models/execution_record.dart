@@ -18,19 +18,32 @@ enum FailureReason {
   /// No failure — execution was successful.
   none,
 
-  /// The action's callback threw an exception.
+  /// The action's callback threw an exception or returned false.
   callbackError,
 
-  /// The device was offline/unavailable at the scheduled time.
-  deviceOffline,
+  /// The device was in Doze mode and the alarm was suppressed.
+  /// Android may throttle alarms in deep Doze despite setExactAndAllowWhileIdle
+  /// if the per-app alarm quota is exhausted.
+  dozeModeSuppressed,
 
-  /// The app was not running at the scheduled time.
-  appNotRunning,
+  /// The SCHEDULE_EXACT_ALARM permission was not granted.
+  /// Without this permission, AlarmManager cannot schedule exact alarms.
+  alarmPermissionDenied,
 
   /// The action timed out during execution.
   timeout,
 
+  /// The headless Flutter engine failed to start for background execution.
+  backgroundEngineFailed,
+
+  /// The action ran late — it was executed after its scheduled time.
+  /// The action still ran (as a catch-up), but the delay itself is recorded
+  /// as a failure so the developer has visibility into timing issues.
+  lateExecution,
+
   /// An unknown or uncategorized error occurred.
+  /// Used for missed executions detected during startup recovery where
+  /// the exact cause (device off, app killed, Doze, etc.) cannot be determined.
   unknown,
 }
 

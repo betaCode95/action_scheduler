@@ -94,12 +94,63 @@ interval (for custom)
 
 ### 3.1 Persistence
 
-All data is stored in a local **SQLite database** via the `sqflite` package.
+All data is stored in a local **SQLite database** (`action_scheduler.db`) via the `sqflite` package. The `DatabaseProvider` auto-reopens the connection if it was closed, handling concurrent access between foreground and background isolates.
 
-- **Two tables**: `scheduled_actions` (action definitions, schedules, state) and `execution_logs` (full audit trail of every execution attempt)
-- **Indexed columns**: `actionId`, `scheduledTime`, and `status` on the execution logs table for fast queries
-- **Survives app restarts and device reboots** — the database file persists on disk
-- The `DatabaseProvider` auto-reopens the connection if it was closed, handling concurrent access between foreground and background isolates
+#### Table: `scheduled_actions`
+
+Stores action definitions with flattened schedule and notification config.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PK | UUID unique identifier |
+| `name` | TEXT | Human-readable name |
+| `description` | TEXT | Optional description |
+| `type` | INTEGER | Schedule type: 0=daily, 1=weekly, 2=monthly, 3=interval |
+| `hour`, `minute` | INTEGER | Time of day to run |
+| `dayOfWeek` | INTEGER | 1=Mon to 7=Sun (weekly only) |
+| `dayOfMonth` | INTEGER | 1-31 (monthly only) |
+| `intervalMinutes` | INTEGER | Custom interval (interval type only) |
+| `isActive` | INTEGER | 1=active, 0=paused |
+| `createdAt` | TEXT | ISO 8601 creation timestamp |
+| `lastRunAt` | TEXT | ISO 8601 last execution time |
+| `nextRunAt` | TEXT | ISO 8601 next scheduled run (used for due-action queries) |
+| `hasNotification` | INTEGER | 1=has notification config |
+| `notifTitle`, `notifBody` | TEXT | Notification content |
+| `leadTimeSeconds` | INTEGER | Seconds before action to fire notification (supports 30s) |
+| `notifEnabled` | INTEGER | 1=enabled |
+| `metadata` | TEXT | Comma-separated key=value pairs for developer data |
+
+#### Table: `execution_logs`
+
+Complete audit trail of every execution attempt, failure, and catch-up.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PK | UUID unique identifier |
+| `actionId` | TEXT FK | References `scheduled_actions.id` (CASCADE delete) |
+| `scheduledTime` | TEXT | ISO 8601 — when the action *should* have run |
+| `executionTime` | TEXT | ISO 8601 — when it *actually* ran (null if missed) |
+| `status` | INTEGER | 0=success, 1=failed, 2=missed, 3=skipped |
+| `durationMs` | INTEGER | Execution duration in milliseconds |
+| `errorMessage` | TEXT | Human-readable error/delay details |
+| `failureReason` | INTEGER | Categorized reason (see Failure Reasons below) |
+
+**Indexes** (3): `actionId` (log lookup per action), `scheduledTime` (ordering and pruning), `status` (failure filtering).
+
+#### Failure Reasons
+
+Each failed or missed execution is categorized with a specific `FailureReason`:
+
+| Value | Name | Description |
+|-------|------|-------------|
+| 0 | `none` | Execution was successful |
+| 1 | `callbackError` | The developer's handler threw an exception or returned false |
+| 2 | `dozeModeSuppressed` | Alarm was suppressed by Android Doze mode (detected when app is not exempt from battery optimizations) |
+| 3 | `alarmPermissionDenied` | `SCHEDULE_EXACT_ALARM` permission was not granted |
+| 4 | `timeout` | Execution exceeded time limit |
+| 5 | `backgroundEngineFailed` | Headless Flutter engine could not start |
+| 6 | `lateExecution` | Action ran successfully but later than scheduled (catch-up) — logged with the delay duration |
+| 7 | `unknown` | Missed execution where the exact cause cannot be determined (device off, force-stopped, etc.) |
 
 ### 3.2 Scheduling — Three Layers of Defense
 
@@ -113,7 +164,11 @@ The SDK uses a layered approach to ensure tasks run reliably:
 
 **Background execution flow**: When a native alarm fires, the OS starts a `BackgroundExecutionService` (Android) or triggers a `BGProcessingTask` (iOS). This service launches a **headless FlutterEngine** (no UI), resolves the developer's Dart callback via `PluginUtilities`, initializes the SQLite database, runs all due actions, records results, and signals completion back to native.
 
-**Startup recovery flow**: On every app launch, the SDK queries all active actions where `nextRunAt < now`. For each, it computes every missed run time, logs them as `ExecutionRecord(status: missed)`, executes the most recent one as a catch-up, and advances `nextRunAt` to the next future occurrence.
+**Startup recovery flow**: On every app launch, the SDK queries all active actions where `nextRunAt < now`. For each missed action it:
+1. Checks `isIgnoringBatteryOptimizations()` to determine if Doze mode likely suppressed the alarm
+2. Logs a **failure record** for every missed run time (with `dozeModeSuppressed` or `unknown` reason, including how late it was)
+3. **Re-executes** the action as a catch-up and logs the result with `lateExecution` reason (e.g., "Catch-up execution (late by 2m 15s)")
+4. Advances `nextRunAt` to the next future occurrence
 
 ### 3.3 Observability
 
@@ -122,7 +177,7 @@ The SDK maintains a complete audit trail:
 - **Every execution** (success, failure, or miss) is recorded as an `ExecutionRecord` with timestamp, duration, status, and error details
 - **Query APIs**: `getExecutionLogs(actionId)`, `getAllExecutionLogs()`, `getFailedExecutions()`, `getExecutionStats(actionId)` — returns totals, success count, failure count, and average duration
 - **Reactive streams**: `actionChanges` and `executionChanges` broadcast real-time updates for UI binding
-- **Failure categorization**: `FailureReason` enum distinguishes between callback errors, app not running, device offline, and timeout
+- **Failure categorization**: `FailureReason` enum distinguishes between callback errors, Doze mode suppression, permission issues, late executions, engine failures, and unknown causes
 - **Log pruning**: `pruneExecutionLogs(retention: Duration(days: 30))` for cleanup
 
 ---

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -61,6 +62,12 @@ class ActionSchedulerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         when (call.method) {
             "canScheduleExactAlarms" -> {
                 result.success(canScheduleExactAlarms(context))
+            }
+
+            "isIgnoringBatteryOptimizations" -> {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                val isIgnoring = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+                result.success(isIgnoring)
             }
 
             "openExactAlarmSettings" -> {

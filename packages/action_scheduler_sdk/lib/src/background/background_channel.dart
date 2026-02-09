@@ -44,6 +44,22 @@ class BackgroundChannel {
     }
   }
 
+  /// Checks if the app is ignoring battery optimizations (exempt from Doze).
+  ///
+  /// If false, the device's Doze mode may suppress or delay alarms.
+  /// Returns true on iOS or if the check is unavailable.
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    if (!Platform.isAndroid) return true;
+
+    try {
+      final result = await _channel
+          .invokeMethod<bool>('isIgnoringBatteryOptimizations');
+      return result ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// Registers the Dart callback dispatcher with native code.
   ///
   /// The [callbackHandle] is obtained from [PluginUtilities.getCallbackHandle]
