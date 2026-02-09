@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/widgets.dart';
 
 import '../engine/task_runner.dart';
+import '../models/execution_record.dart';
 import '../persistence/action_repository.dart';
 import '../persistence/database_provider.dart';
 import '../persistence/execution_repository.dart';
@@ -34,7 +35,11 @@ void callbackDispatcher() {
         final dbProvider = DatabaseProvider();
         final actionRepo = ActionRepository(dbProvider);
         final executionRepo = ExecutionRepository(dbProvider);
-        final taskRunner = TaskRunner(actionRepo, executionRepo);
+        final taskRunner = TaskRunner(
+          actionRepo,
+          executionRepo,
+          executionContext: ExecutionContext.background,
+        );
 
         taskRunner.registerHandler(handler);
         await taskRunner.runDueActions();

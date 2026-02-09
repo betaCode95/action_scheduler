@@ -57,7 +57,14 @@ class TaskRunner {
     Duration checkInterval = const Duration(seconds: 30),
   }) {
     _foregroundTimer?.cancel();
-    _foregroundTimer = Timer.periodic(checkInterval, (_) => runDueActions());
+    _foregroundTimer = Timer.periodic(checkInterval, (_) async {
+      try {
+        await runDueActions();
+      } catch (e) {
+        // Silently handle database errors (e.g., DB closed during background execution).
+        // The next timer tick will retry.
+      }
+    });
   }
 
   /// Stops the foreground scheduler.
@@ -69,18 +76,25 @@ class TaskRunner {
   /// Checks for and executes all actions that are currently due.
   ///
   /// Returns the number of actions that were executed.
+  /// Database errors are caught and return 0 (next tick retries).
   Future<int> runDueActions() async {
     if (_handler == null) return 0;
 
-    final dueActions = await _actionRepo.getDueActions();
-    int executed = 0;
+    try {
+      final dueActions = await _actionRepo.getDueActions();
+      int executed = 0;
 
-    for (final action in dueActions) {
-      await _executeAction(action);
-      executed++;
+      for (final action in dueActions) {
+        await _executeAction(action);
+        executed++;
+      }
+
+      return executed;
+    } catch (e) {
+      // Database may be temporarily unavailable (e.g., closed by a
+      // concurrent background isolate). Return 0 and retry next tick.
+      return 0;
     }
-
-    return executed;
   }
 
   /// Performs startup recovery: detects missed actions and logs them.
